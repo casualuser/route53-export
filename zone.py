@@ -85,7 +85,7 @@ def get_zone_from_route53(config):
         )
     except Exception as e:
         print('requested zone doesn\'t exist')
-        quit(self, 1)
+        sys.exit(1)
 
     if zone:
         records = client.list_resource_record_sets(HostedZoneId=zone_id)
