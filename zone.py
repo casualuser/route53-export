@@ -1,10 +1,12 @@
 import io
 import sys
+import dns.zone
 import json
 import boto3
 
 from os import path
 from configparser import ConfigParser
+
 
 def print_to_string(*args, **kwargs):
     output = io.StringIO()
@@ -74,66 +76,52 @@ def get_zone_from_file(config):
     return zone_block
 
 
-def get_zone_from_route53(config):
-
-    zones = ""
+def get_zone_origin(config):
     client = client_setup(config)
-    try: 
+
+    try:
         zone_id = config['hosted_zone_id']
-        zone = client.get_hosted_zone(
-            Id=zone_id
-        )
+        zone = client.get_hosted_zone(Id=zone_id)
+        origin = zone['HostedZone']['Name']
     except Exception as e:
         print('requested zone doesn\'t exist')
         sys.exit(1)
 
-    if zone:
-        records = client.list_resource_record_sets(HostedZoneId=zone_id)
-
-    for record in records['ResourceRecordSets']:
-        if record.get('ResourceRecords'):
-            for target in record['ResourceRecords']:
-                zone = print_to_string(record['Name'], record['TTL'], 'IN', record['Type'], target['Value'], sep = '\t')
-                zones += zone
-        elif record.get('AliasTarget'):
-            zone = print_to_string(record['Name'], 300, 'IN', record['Type'], record['AliasTarget']['DNSName'], '; ALIAS', sep = '\t')
-            zones += zone
-        else:
-            raise Exception('Unknown record type: {}'.format(record))
-
-    return zones
+    return origin
 
 
-def get_all_zones_from_route53(config):
-
+def get_zone_from_route53(config):
     client = client_setup(config)
-
     zones = ""
 
-    paginate_hosted_zones = client.get_paginator('list_hosted_zones')
-    paginate_resource_record_sets = client.get_paginator('list_resource_record_sets')
+    try:
+        origin = get_zone_origin(config)
+        zone_id = config['hosted_zone_id']
+    except Exception as e:
+        print('requested zone doesn\'t exist')
+        sys.exit(1)
 
-    domains = [domain.lower().rstrip('.') for domain in sys.argv[1:]]    
+    if origin and zone_id:
+        records = client.list_resource_record_sets(HostedZoneId=zone_id)
 
-    for zone_page in paginate_hosted_zones.paginate():
-        for zone in zone_page['HostedZones']:
-
-            if domains and not zone['Name'].lower().rstrip('.') in domains:
-                continue
-
-            for record_page in paginate_resource_record_sets.paginate(HostedZoneId = zone['Id']):
-                for record in record_page['ResourceRecordSets']:
-                    if record.get('ResourceRecords'):
-                        for target in record['ResourceRecords']:
-                            zone = print_to_string(record['Name'], record['TTL'], 'IN', record['Type'], target['Value'], sep = '\t')
-                            zones += zone
-                    elif record.get('AliasTarget'):
-                        zone = print_to_string(record['Name'], 300, 'IN', record['Type'], record['AliasTarget']['DNSName'], '; ALIAS', sep = '\t')
-                        zones += zone
-                    else:
-                        raise Exception('Unknown record type: {}'.format(record))
+    if records:
+        for record in records['ResourceRecordSets']:
+            if record.get('ResourceRecords'):
+                for target in record['ResourceRecords']:
+                    zone = print_to_string(record['Name'], record['TTL'], 'IN', record['Type'], target['Value'], sep = '\t')
+                    zones += zone
+            elif record.get('AliasTarget'):
+                zone = print_to_string(record['Name'], 300, 'IN', record['Type'], record['AliasTarget']['DNSName'], '; ALIAS', sep = '\t')
+                zones += zone
+            else:
+                raise Exception('Unknown record type: {}'.format(record))
 
     return zones
+
+
+def parse_zone(zone, origin):
+    parsed_zone = dns.zone.from_text(zone, origin=origin, relativize=False, check_origin=False)
+    return parsed_zone
 
 
 # zone_file_path - File which will be used by script to update
@@ -143,15 +131,14 @@ def get_all_zones_from_route53(config):
 # ------- main -------
 config = set_settings()
 
+origin = get_zone_origin(config)
+
 zone_from_file = get_zone_from_file(config)
 print(zone_from_file)
+parse_zone(zone_from_file, origin)
 
 print('- ' * 20)
 
 zone_from_route53 = get_zone_from_route53(config)
 print(zone_from_route53)
-
-print('- ' * 20)
-
-all_zones_from_route53 = get_all_zones_from_route53(config)
-print(all_zones_from_route53)
+parse_zone(zone_from_route53, origin)
