@@ -23,6 +23,7 @@ python-dateutil==2.8.1
 requests==2.23.0
 requests-file==1.5.1
 s3transfer==0.3.3
+schedule==0.6.0
 six==1.14.0
 tldextract==2.2.2
 traitlets==4.3.3

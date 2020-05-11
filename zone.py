@@ -3,6 +3,7 @@ import sys
 import dns.zone
 import json
 import boto3
+import schedule
 
 from os import path
 from configparser import ConfigParser
@@ -37,8 +38,21 @@ def set_settings():
     elif path.exists('zone.ini'):
         config = get_settings_ini()
 
-    # os.environ.get('SECRET_KEY', None)
-    return config
+    try:
+        if  config['zone_file_path'] and \
+            config['hosted_zone_id'] and \
+            config['filter_record_types'] and \
+            config['aws_access_key_id'] and \
+            config['aws_secret_access_key']:
+
+            return config
+        else:
+            pass
+    except:
+        pass
+
+    print('config file miss one of required parameter')
+    sys.exit(1)
 
 
 def client_setup(config):
@@ -54,7 +68,7 @@ def client_setup(config):
     return client
 
 
-def get_zone_from_file(config):
+def get_zone_from_file_managed(config):
     path = ''
     if config['zone_file_path']:
         path = config['zone_file_path']
@@ -72,6 +86,27 @@ def get_zone_from_file(config):
         else:
             if line.strip() == "; BEGIN ROUTE53 MANAGED BLOCK":
                 found = True
+
+    zone_file.close()
+
+    return zone_block
+
+
+def get_zone_from_file(config):
+    path = ''
+    if config['zone_file_path']:
+        path = config['zone_file_path']
+    else:
+        path = './'
+
+    zone_file = open(path + 'zone.txt')
+    zone_block = ""
+    for line in zone_file:
+        if line.strip() == "; BEGIN ROUTE53 MANAGED BLOCK":
+            break
+        zone_block += line
+
+    zone_file.close()
 
     return zone_block
 
@@ -106,15 +141,16 @@ def get_zone_from_route53(config):
 
     if records:
         for record in records['ResourceRecordSets']:
-            if record.get('ResourceRecords'):
-                for target in record['ResourceRecords']:
-                    zone = print_to_string(record['Name'], record['TTL'], 'IN', record['Type'], target['Value'], sep = '\t')
+            if record['Type'] in config['filter_record_types']:
+                if record.get('ResourceRecords'):
+                    for target in record['ResourceRecords']:
+                        zone = print_to_string(record['Name'], record['TTL'], 'IN', record['Type'], target['Value'], sep = '\t')
+                        zones += zone
+                elif record.get('AliasTarget'):
+                    zone = print_to_string(record['Name'], 300, 'IN', record['Type'], record['AliasTarget']['DNSName'], '; ALIAS', sep = '\t')
                     zones += zone
-            elif record.get('AliasTarget'):
-                zone = print_to_string(record['Name'], 300, 'IN', record['Type'], record['AliasTarget']['DNSName'], '; ALIAS', sep = '\t')
-                zones += zone
-            else:
-                raise Exception('Unknown record type: {}'.format(record))
+                else:
+                    raise Exception('Unknown record type: {}'.format(record))
 
     return zones
 
@@ -124,21 +160,37 @@ def parse_zone(zone, origin):
     return parsed_zone
 
 
-# zone_file_path - File which will be used by script to update
-# hosted_zone_id - AWS private zone id
-# filter_record_types - which records types to be exported (array - A, TXT, AAAA, CNAME etc)
+def zone_update():
 
-# ------- main -------
-config = set_settings()
+    config = set_settings()
 
-origin = get_zone_origin(config)
+    zone_from_file = get_zone_from_file(config)
+    zone_from_file_managed = get_zone_from_file_managed(config)
+    zone_from_route53 = get_zone_from_route53(config)
 
-zone_from_file = get_zone_from_file(config)
-print(zone_from_file)
-parse_zone(zone_from_file, origin)
+    zone_original = zone_from_file + \
+        "; BEGIN ROUTE53 MANAGED BLOCK\n" + \
+        zone_from_file_managed + \
+        "; END ROUTE53 MANAGED BLOCK"
+    print('- ' * 20 + 'original zone' + ' -' * 20)
+    print(zone_original)
 
-print('- ' * 20)
+    zone_updated = zone_from_file + \
+        "; BEGIN ROUTE53 MANAGED BLOCK\n" + \
+        zone_from_route53 + \
+        "; END ROUTE53 MANAGED BLOCK"
+    print('- ' * 20 + 'updated zone' + ' -' * 20)
+    print(zone_updated)
 
-zone_from_route53 = get_zone_from_route53(config)
-print(zone_from_route53)
-parse_zone(zone_from_route53, origin)
+    zone_file = open('zone_updated.txt', 'w')
+    zone_file.write(zone_updated)
+    zone_file.close()
+
+    # origin = get_zone_origin(config)
+    # parse_zone(zone_from_file, origin)
+    # parse_zone(zone_from_route53, origin)
+
+# zone_update()
+schedule.every(60).seconds.do(zone_update)
+while True:
+    schedule.run_pending()
