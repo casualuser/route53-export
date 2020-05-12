@@ -69,15 +69,9 @@ def client_setup(config):
 
 
 def get_zone_from_file_managed(config):
-    path = ''
-    if config['zone_file_path']:
-        path = config['zone_file_path']
-    else:
-        path = './'
-    
-    zone_file = open(path + 'zone.txt')
-    zone_block = ""
     found = False
+    zone_block = ""
+    zone_file = open(config['zone_file_path'])
     for line in zone_file:
         if found:
             if line.strip() == "; END ROUTE53 MANAGED BLOCK":
@@ -93,14 +87,8 @@ def get_zone_from_file_managed(config):
 
 
 def get_zone_from_file(config):
-    path = ''
-    if config['zone_file_path']:
-        path = config['zone_file_path']
-    else:
-        path = './'
-
-    zone_file = open(path + 'zone.txt')
     zone_block = ""
+    zone_file = open(config['zone_file_path'])
     for line in zone_file:
         if line.strip() == "; BEGIN ROUTE53 MANAGED BLOCK":
             break
@@ -182,7 +170,7 @@ def zone_update():
     print('- ' * 20 + 'updated zone' + ' -' * 20)
     print(zone_updated)
 
-    zone_file = open('zone_updated.txt', 'w')
+    zone_file = open(config['zone_file_path'], 'w')
     zone_file.write(zone_updated)
     zone_file.close()
 
