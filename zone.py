@@ -22,7 +22,7 @@ def get_settings_ini():
     config = ConfigParser()
     config.read('zone.ini')
 
-    return config
+    return config._sections['main']
 
 
 def get_settings_json():
